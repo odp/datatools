@@ -1,6 +1,7 @@
 import json
 import os
 import io
+import gzip
 
 from typing import Any, Dict, Union, List
 from collections.abc import Sequence
@@ -27,7 +28,7 @@ class ZstdUtf8WriteFile:
         self.file = open(self.filename, "wb")
         self.compressor = zstandard.ZstdCompressor(level=self.level)
         self.writer = self.compressor.stream_writer(self.file)
-        self.text_writer = io.TextIOWrapper(self.writer, encoding='utf-8')
+        self.text_writer = io.TextIOWrapper(self.writer, encoding="utf-8")
         return self.text_writer
 
     def close(self):
@@ -41,7 +42,7 @@ def zstd_utf8_read_open(filename, level=3):
     with open(filename, "rb") as f:
         decompressor = zstandard.ZstdDecompressor(max_window_size=2147483648)
         with decompressor.stream_reader(f) as stream_reader:
-            yield io.TextIOWrapper(stream_reader, encoding='utf-8')
+            yield io.TextIOWrapper(stream_reader, encoding="utf-8")
 
 
 class Subset(Array):
@@ -54,7 +55,10 @@ class Subset(Array):
         N = len(dataset)
         shard_indices = np.linspace(0, N, num_shards + 1)
 
-        return cls(dataset, range(int(shard_indices[shard_id]), int(shard_indices[shard_id + 1])))
+        return cls(
+            dataset,
+            range(int(shard_indices[shard_id]), int(shard_indices[shard_id + 1])),
+        )
 
     def __len__(self) -> int:
         return len(self.indices)
@@ -74,7 +78,7 @@ class LocalDatasets(Array):
             filename = os.path.join(path, get_index_basename())  # pyright: ignore
             obj = json.load(open(filename))
 
-            for info in obj['shards']:
+            for info in obj["shards"]:
                 shard = reader_from_json(path, "", info)
                 self.shards.append(shard)
         self.num_samples = sum([shard.samples for shard in self.shards])
@@ -95,7 +99,7 @@ class LocalDatasets(Array):
         return shard[index_in_shard]
 
 
-class JsonlDataset(Array):
+class JsonlDataset0(Array):
     def __init__(self, paths: List[Union[str, Path]]):
         self.paths = paths
 
@@ -119,6 +123,34 @@ class JsonlDataset(Array):
     def get_item(self, idx: int) -> Dict[str, Any]:
         return json.loads(self.lines[idx])
 
+
+class JsonlDataset(Array):
+    def __init__(self, paths: List[Union[str, Path]]):
+        self.paths = paths
+        self.lines = []
+        for path in paths:
+            path = Path(path)
+
+            # Handle different compression formats
+            if path.suffixes[-1] in [".zstd", ".zst"]:
+                with zstd_utf8_read_open(path) as f:
+                    self.lines.extend(f.readlines())
+            elif path.suffixes[-1] in [".gz", ".gzip"]:
+                with gzip.open(path, "rt", encoding="utf-8") as f:
+                    self.lines.extend(f.readlines())
+            else:
+                with open(path, "r", encoding="utf-8") as f:
+                    self.lines.extend(f.readlines())
+
+    def __len__(self) -> int:
+        return len(self.lines)
+
+    @property
+    def size(self) -> int:
+        return len(self.lines)
+
+    def get_item(self, idx: int) -> Dict[str, Any]:
+        return json.loads(self.lines[idx])
 
 
 class NDArrayWriter:
@@ -146,8 +178,6 @@ class NDArrayWriter:
                     np.save(f"{self.out}.npy", np.array(buffer))
 
 
-
-
 class DatetimeJsonEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, datetime):
@@ -164,7 +194,7 @@ class JsonlWriter:
     def __init__(self, columns, out, compression=None):
         self.columns = set(columns)
         self.out = out
-        
+
         parent_folder = os.path.dirname(self.out)
         if parent_folder:
             os.makedirs(parent_folder, exist_ok=True)
@@ -179,7 +209,9 @@ class JsonlWriter:
 
     def write(self, item):
         if not self.columns.issubset(item.keys()):
-            print(f"Warning: Item {item} does not contain all columns: {self.columns - item.keys()}")
+            print(
+                f"Warning: Item {item} does not contain all columns: {self.columns - item.keys()}"
+            )
         self.file.write(json.dumps(item, cls=DatetimeJsonEncoder) + "\n")
 
     def finish(self):
