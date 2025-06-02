@@ -16,6 +16,7 @@ from streaming.base.spanner import Spanner
 
 import zstandard
 from contextlib import contextmanager
+import orjson
 
 
 class ZstdUtf8WriteFile:
@@ -208,11 +209,7 @@ class JsonlWriter:
             self.file = self.file_handle
 
     def write(self, item):
-        if not self.columns.issubset(item.keys()):
-            print(
-                f"Warning: Item {item} does not contain all columns: {self.columns - item.keys()}"
-            )
-        self.file.write(json.dumps(item, cls=DatetimeJsonEncoder) + "\n")
+        self.file.write(orjson.dumps(item, option=orjson.OPT_APPEND_NEWLINE))
 
     def finish(self):
         self.file_handle.close()
