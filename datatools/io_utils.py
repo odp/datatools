@@ -205,7 +205,7 @@ class JsonlWriter:
             self.file_handle = ZstdUtf8WriteFile(f"{out}.jsonl.{ext}", level)
             self.file = self.file_handle.open()
         else:
-            self.file_handle = open(f"{out}.jsonl", "w")
+            self.file_handle = open(f"{out}.jsonl", "wb")
             self.file = self.file_handle
 
     def write(self, item):
